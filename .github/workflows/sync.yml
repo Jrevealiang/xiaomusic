@@ -1,0 +1,24 @@
+name: Sync with Upstream
+on:
+  push:
+    branches: [ "main" ] # 监听原仓库的推送
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 检出代码
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # 获取足够的提交历史以处理合并
+# 2. 配置 SSH 密钥 (必须提前上传到 Secrets)
+      - name: Setup SSH Key
+        uses: webfactory/ssh-agent@v0.7.2
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+# 3. 同步代码
+      - name: Mirror
+        uses: actions-hub/mirror-action@v1.0.0
+        with:
+          target-url: https://github.com/Jrevealiang/xiaomusic.git  # 替换为你的 Fork 地址
+          target-branch: main
