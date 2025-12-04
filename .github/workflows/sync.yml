@@ -22,3 +22,4 @@ jobs:
         with:
           target-url: https://github.com/Jrevealiang/xiaomusic.git  # 替换为你的 Fork 地址
           target-branch: main
+          
