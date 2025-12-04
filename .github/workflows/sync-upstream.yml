@@ -1,4 +1,4 @@
-name: Sync upstream repository
+name: Sync upstream repository and push to Gitee
 
 on:
   # 定时触发：每天UTC时间00:00（北京时间08:00）同步一次
@@ -48,5 +48,83 @@ jobs:
           # 合并上游更改
           git merge upstream/$CURRENT_BRANCH --no-edit
           
-          # 推送到您的仓库
-          git push origin $CURRENT_BRANCH
+          # 检查是否有合并冲突
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "⚠️  Merge conflicts detected! Please resolve manually."
+            echo "Conflicting files:"
+            git diff --name-only --diff-filter=U
+            # 继续执行，但记录冲突
+          fi
+      
+      # 4. 推送到GitHub仓库（检查是否有更改需要推送）
+      - name: Push to GitHub
+        run: |
+          # 获取当前分支名
+          CURRENT_BRANCH=$(git branch --show-current)
+          
+          # 检查是否有需要推送的更改
+          if git status --porcelain | grep -q . || git log origin/$CURRENT_BRANCH..$CURRENT_BRANCH | grep -q .; then
+            echo "🔄 Pushing changes to GitHub..."
+            git push origin $CURRENT_BRANCH
+            echo "✅ Successfully pushed to GitHub"
+          else
+            echo "ℹ️  No changes to push to GitHub"
+          fi
+      
+      # 5. 推送到Gitee仓库（使用HTTP+Token方式）
+      - name: Push to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          # 获取当前分支名
+          CURRENT_BRANCH=$(git branch --show-current)
+          
+          # 验证GITEE_TOKEN是否存在
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "❌ GITEE_TOKEN is not set. Please add it to GitHub Secrets."
+            exit 1
+          fi
+          
+          # 构建Gitee远程URL（使用Token认证）
+          GITEE_URL="https://oauth2:${GITEE_TOKEN}@git.jrevea.cn:88/liang/xiaomusic_github.git"
+          
+          echo "🔗 Gitee URL: https://oauth2:***@git.jrevea.cn:88/liang/xiaomusic_github.git"
+          
+          # 添加或更新Gitee远程仓库
+          git remote add gitee "$GITEE_URL" 2>/dev/null || true
+          git remote set-url gitee "$GITEE_URL"
+          
+          echo "🔄 Pushing to Gitee (branch: $CURRENT_BRANCH)..."
+          
+          # 测试Gitee连接（可选）
+          echo "Testing connection to Gitee..."
+          git ls-remote "$GITEE_URL" --heads "$CURRENT_BRANCH" 2>/dev/null && echo "✅ Gitee connection successful" || echo "⚠️  Gitee connection test failed, but continuing..."
+          
+          # 推送到Gitee（强制推送确保一致性）
+          if git push gitee "$CURRENT_BRANCH" --force; then
+            echo "✅ Successfully pushed to Gitee"
+          else
+            echo "❌ Failed to push to Gitee. Trying with more details..."
+            
+            # 尝试使用详细输出
+            git push gitee "$CURRENT_BRANCH" --force --verbose
+            
+            # 检查可能的问题
+            echo "Checking remote configuration..."
+            git remote -v
+            
+            echo "Checking branch information..."
+            git branch -a
+            
+            exit 1
+          fi
+      
+      # 6. 清理和总结
+      - name: Cleanup and summary
+        run: |
+          echo "========================================"
+          echo "🎉 Sync completed successfully!"
+          echo "📅 Time: $(date)"
+          echo "🌐 GitHub: https://github.com/Jrevealiang/xiaomusic"
+          echo "🏠 Gitee: https://git.jrevea.cn:88/liang/xiaomusic_github"
+          echo "========================================"
