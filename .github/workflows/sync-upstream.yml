@@ -1,16 +1,9 @@
 name: Sync upstream repository and push to Gitee
 
 on:
-  # 定时触发：每天UTC时间00:00（北京时间08:00）同步一次
   schedule:
     - cron: '0 0 * * *'
-  
-  # 手动触发：在GitHub页面上手动运行
   workflow_dispatch:
-  
-  # 当上游仓库有push事件时触发（需要配置webhook，可选）
-  # repository_dispatch:
-  #   types: [upstream-updated]
 
 jobs:
   sync:
@@ -21,7 +14,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # 获取完整历史记录
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       
       # 2. 配置Git用户信息
@@ -33,98 +26,142 @@ jobs:
       # 3. 添加上游仓库并同步
       - name: Sync from upstream
         run: |
-          # 添加上游仓库
           git remote add upstream https://github.com/hanxi/xiaomusic.git || true
-          
-          # 获取上游仓库更新
           git fetch upstream
-          
-          # 切换到主分支（根据实际情况可能是main或master）
           git checkout main 2>/dev/null || git checkout master
-          
-          # 获取当前分支名
           CURRENT_BRANCH=$(git branch --show-current)
-          
-          # 合并上游更改
           git merge upstream/$CURRENT_BRANCH --no-edit
-          
-          # 检查是否有合并冲突
-          if git diff --name-only --diff-filter=U | grep -q .; then
-            echo "⚠️  Merge conflicts detected! Please resolve manually."
-            echo "Conflicting files:"
-            git diff --name-only --diff-filter=U
-            # 继续执行，但记录冲突
-          fi
       
-      # 4. 推送到GitHub仓库（检查是否有更改需要推送）
+      # 4. 推送到GitHub
       - name: Push to GitHub
         run: |
-          # 获取当前分支名
           CURRENT_BRANCH=$(git branch --show-current)
-          
-          # 检查是否有需要推送的更改
           if git status --porcelain | grep -q . || git log origin/$CURRENT_BRANCH..$CURRENT_BRANCH | grep -q .; then
             echo "🔄 Pushing changes to GitHub..."
             git push origin $CURRENT_BRANCH
-            echo "✅ Successfully pushed to GitHub"
-          else
-            echo "ℹ️  No changes to push to GitHub"
           fi
       
-      # 5. 推送到Gitee仓库（使用HTTP+Token方式）
-      - name: Push to Gitee
+      # 5. 配置Gitee推送（使用write:repository权限）
+      - name: Configure and push to Gitee
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
-          # 获取当前分支名
-          CURRENT_BRANCH=$(git branch --show-current)
+          echo "=== Configuring Gitee Push ==="
           
-          # 验证GITEE_TOKEN是否存在
+          # 验证令牌
           if [ -z "$GITEE_TOKEN" ]; then
-            echo "❌ GITEE_TOKEN is not set. Please add it to GitHub Secrets."
+            echo "❌ ERROR: GITEE_TOKEN is not set!"
             exit 1
           fi
           
-          # 构建Gitee远程URL（使用Token认证）
-          GITEE_URL="https://oauth2:${GITEE_TOKEN}@git.jrevea.cn:88/liang/xiaomusic_github.git"
+          echo "✅ GITEE_TOKEN is available"
+          echo "Token permissions: write:repository (confirmed)"
           
-          echo "🔗 Gitee URL: https://oauth2:***@git.jrevea.cn:88/liang/xiaomusic_github.git"
+          CURRENT_BRANCH=$(git branch --show-current)
+          echo "Current branch: $CURRENT_BRANCH"
           
-          # 添加或更新Gitee远程仓库
-          git remote add gitee "$GITEE_URL" 2>/dev/null || true
-          git remote set-url gitee "$GITEE_URL"
+          # 方法1：直接使用令牌（Gitea/Gitee常用格式）
+          echo ""
+          echo "Trying Method 1: Direct token usage..."
+          GITEE_URL="https://$GITEE_TOKEN@git.jrevea.cn:88/liang/xiaomusic_github.git"
           
-          echo "🔄 Pushing to Gitee (branch: $CURRENT_BRANCH)..."
+          # 清理旧的remote
+          git remote remove gitee 2>/dev/null || true
           
-          # 测试Gitee连接（可选）
-          echo "Testing connection to Gitee..."
-          git ls-remote "$GITEE_URL" --heads "$CURRENT_BRANCH" 2>/dev/null && echo "✅ Gitee connection successful" || echo "⚠️  Gitee connection test failed, but continuing..."
+          # 添加新的remote
+          git remote add gitee "$GITEE_URL"
           
-          # 推送到Gitee（强制推送确保一致性）
-          if git push gitee "$CURRENT_BRANCH" --force; then
-            echo "✅ Successfully pushed to Gitee"
+          echo "Testing connection..."
+          if git ls-remote gitee --heads 2>/dev/null; then
+            echo "✅ Connection successful!"
+            echo "Pushing to Gitee..."
+            if git push gitee "$CURRENT_BRANCH" --force; then
+              echo "✅ Successfully pushed to Gitee!"
+              exit 0
+            else
+              echo "❌ Push failed with Method 1"
+            fi
           else
-            echo "❌ Failed to push to Gitee. Trying with more details..."
-            
-            # 尝试使用详细输出
-            git push gitee "$CURRENT_BRANCH" --force --verbose
-            
-            # 检查可能的问题
-            echo "Checking remote configuration..."
-            git remote -v
-            
-            echo "Checking branch information..."
-            git branch -a
-            
-            exit 1
+            echo "❌ Connection failed with Method 1"
           fi
+          
+          # 方法2：使用username:token格式
+          echo ""
+          echo "Trying Method 2: username:token format..."
+          # 请将YOUR_USERNAME替换为您的实际用户名
+          GITEE_URL="https://liang:$GITEE_TOKEN@git.jrevea.cn:88/liang/xiaomusic_github.git"
+          
+          git remote remove gitee 2>/dev/null || true
+          git remote add gitee "$GITEE_URL"
+          
+          echo "Testing connection..."
+          if git ls-remote gitee --heads 2>/dev/null; then
+            echo "✅ Connection successful!"
+            echo "Pushing to Gitee..."
+            if git push gitee "$CURRENT_BRANCH" --force; then
+              echo "✅ Successfully pushed to Gitee!"
+              exit 0
+            else
+              echo "❌ Push failed with Method 2"
+            fi
+          else
+            echo "❌ Connection failed with Method 2"
+          fi
+          
+          # 方法3：使用Git Credential Helper
+          echo ""
+          echo "Trying Method 3: Git Credential Helper..."
+          
+          # 配置credential helper
+          git config --global credential.helper store
+          
+          # 创建credential文件
+          CREDENTIAL_FILE="$HOME/.git-credentials"
+          echo "https://liang:$GITEE_TOKEN@git.jrevea.cn:88" > "$CREDENTIAL_FILE"
+          chmod 600 "$CREDENTIAL_FILE"
+          
+          GITEE_URL="https://git.jrevea.cn:88/liang/xiaomusic_github.git"
+          
+          git remote remove gitee 2>/dev/null || true
+          git remote add gitee "$GITEE_URL"
+          
+          echo "Testing connection..."
+          if git ls-remote gitee --heads 2>/dev/null; then
+            echo "✅ Connection successful!"
+            echo "Pushing to Gitee..."
+            if git push gitee "$CURRENT_BRANCH" --force; then
+              echo "✅ Successfully pushed to Gitee!"
+              exit 0
+            else
+              echo "❌ Push failed with Method 3"
+            fi
+          else
+            echo "❌ Connection failed with Method 3"
+          fi
+          
+          # 如果所有方法都失败
+          echo ""
+          echo "❌ All methods failed!"
+          echo ""
+          echo "🔍 Troubleshooting steps:"
+          echo "1. Verify the repository URL is correct:"
+          echo "   https://git.jrevea.cn:88/liang/xiaomusic_github.git"
+          echo "2. Check if port 88 is accessible from GitHub Actions"
+          echo "3. Verify GITEE_TOKEN has write:repository permission"
+          echo "4. Try accessing the repository manually:"
+          echo "   git clone https://git.jrevea.cn:88/liang/xiaomusic_github.git"
+          echo "5. Check Gitee logs for authentication errors"
+          
+          exit 1
       
-      # 6. 清理和总结
-      - name: Cleanup and summary
+      # 6. 总结
+      - name: Summary
+        if: always()
         run: |
           echo "========================================"
-          echo "🎉 Sync completed successfully!"
-          echo "📅 Time: $(date)"
-          echo "🌐 GitHub: https://github.com/Jrevealiang/xiaomusic"
-          echo "🏠 Gitee: https://git.jrevea.cn:88/liang/xiaomusic_github"
+          echo "📊 Workflow Summary"
+          echo "========================================"
+          echo "Time: $(date)"
+          echo "GitHub Repo: https://github.com/Jrevealiang/xiaomusic"
+          echo "Gitee Repo: https://git.jrevea.cn:88/liang/xiaomusic_github"
           echo "========================================"
