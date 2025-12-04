@@ -1,0 +1,52 @@
+name: Sync upstream repository
+
+on:
+  # 定时触发：每天UTC时间00:00（北京时间08:00）同步一次
+  schedule:
+    - cron: '0 0 * * *'
+  
+  # 手动触发：在GitHub页面上手动运行
+  workflow_dispatch:
+  
+  # 当上游仓库有push事件时触发（需要配置webhook，可选）
+  # repository_dispatch:
+  #   types: [upstream-updated]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. 检出您的仓库
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # 获取完整历史记录
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      # 2. 配置Git用户信息
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      
+      # 3. 添加上游仓库并同步
+      - name: Sync from upstream
+        run: |
+          # 添加上游仓库
+          git remote add upstream https://github.com/hanxi/xiaomusic.git || true
+          
+          # 获取上游仓库更新
+          git fetch upstream
+          
+          # 切换到主分支（根据实际情况可能是main或master）
+          git checkout main 2>/dev/null || git checkout master
+          
+          # 获取当前分支名
+          CURRENT_BRANCH=$(git branch --show-current)
+          
+          # 合并上游更改
+          git merge upstream/$CURRENT_BRANCH --no-edit
+          
+          # 推送到您的仓库
+          git push origin $CURRENT_BRANCH
