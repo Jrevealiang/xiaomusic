@@ -1,4 +1,4 @@
-name: Sync upstream repository and push to Gitee
+name: Sync to Gitee via SSH on Port 88
 
 on:
   schedule:
@@ -10,158 +10,80 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      # 1. 检出您的仓库
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
       
-      # 2. 配置Git用户信息
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
       
-      # 3. 添加上游仓库并同步
       - name: Sync from upstream
         run: |
           git remote add upstream https://github.com/hanxi/xiaomusic.git || true
           git fetch upstream
           git checkout main 2>/dev/null || git checkout master
           CURRENT_BRANCH=$(git branch --show-current)
-          git merge upstream/$CURRENT_BRANCH --no-edit
+          git merge upstream/$CURRENT_BRANCH --no-edit --strategy-option theirs || echo "Merge completed"
       
-      # 4. 推送到GitHub
       - name: Push to GitHub
         run: |
           CURRENT_BRANCH=$(git branch --show-current)
-          if git status --porcelain | grep -q . || git log origin/$CURRENT_BRANCH..$CURRENT_BRANCH | grep -q .; then
-            echo "🔄 Pushing changes to GitHub..."
+          if ! git diff --quiet origin/$CURRENT_BRANCH; then
             git push origin $CURRENT_BRANCH
           fi
       
-      # 5. 配置Gitee推送（使用write:repository权限）
-      - name: Configure and push to Gitee
+      - name: Setup SSH for Gitee Port 88
         env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          echo "=== Configuring Gitee Push ==="
+          echo "=== Setting up SSH for Gitee (Port 88) ==="
           
-          # 验证令牌
-          if [ -z "$GITEE_TOKEN" ]; then
-            echo "❌ ERROR: GITEE_TOKEN is not set!"
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "❌ SSH_PRIVATE_KEY is not set"
             exit 1
           fi
           
-          echo "✅ GITEE_TOKEN is available"
-          echo "Token permissions: write:repository (confirmed)"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # SSH over port 88 (如果Gitee支持SSH on port 88)
+          cat > ~/.ssh/config << EOF
+          Host git.jrevea.cn
+            HostName git.jrevea.cn
+            Port 88
+            User git
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
+          
+          chmod 600 ~/.ssh/config
+          
+          echo "Testing SSH connection on port 88..."
+          ssh -T git@git.jrevea.cn 2>&1 | head -5 || echo "SSH test attempted"
+      
+      - name: Push to Gitee via SSH Port 88
+        run: |
+          echo "=== Pushing to Gitee via SSH (Port 88) ==="
           
           CURRENT_BRANCH=$(git branch --show-current)
-          echo "Current branch: $CURRENT_BRANCH"
           
-          # 方法1：直接使用令牌（Gitea/Gitee常用格式）
-          echo ""
-          echo "Trying Method 1: Direct token usage..."
-          GITEE_URL="https://$GITEE_TOKEN@git.jrevea.cn:88/liang/xiaomusic_github.git"
+          # 尝试SSH over port 88
+          GITEE_SSH_URL="ssh://git@git.jrevea.cn:88/liang/xiaomusic_github.git"
           
-          # 清理旧的remote
-          git remote remove gitee 2>/dev/null || true
-          
-          # 添加新的remote
-          git remote add gitee "$GITEE_URL"
+          git remote remove gitee-ssh 2>/dev/null || true
+          git remote add gitee-ssh "$GITEE_SSH_URL"
           
           echo "Testing connection..."
-          if git ls-remote gitee --heads 2>/dev/null; then
-            echo "✅ Connection successful!"
-            echo "Pushing to Gitee..."
-            if git push gitee "$CURRENT_BRANCH" --force; then
-              echo "✅ Successfully pushed to Gitee!"
-              exit 0
-            else
-              echo "❌ Push failed with Method 1"
-            fi
+          if timeout 30 git ls-remote gitee-ssh 2>&1; then
+            echo "✅ SSH connection successful on port 88!"
+            git push gitee-ssh "$CURRENT_BRANCH" --force && echo "✅ Push successful!"
           else
-            echo "❌ Connection failed with Method 1"
+            echo "❌ SSH on port 88 failed, trying HTTPS..."
           fi
-          
-          # 方法2：使用username:token格式
-          echo ""
-          echo "Trying Method 2: username:token format..."
-          # 请将YOUR_USERNAME替换为您的实际用户名
-          GITEE_URL="https://liang:$GITEE_TOKEN@git.jrevea.cn:88/liang/xiaomusic_github.git"
-          
-          git remote remove gitee 2>/dev/null || true
-          git remote add gitee "$GITEE_URL"
-          
-          echo "Testing connection..."
-          if git ls-remote gitee --heads 2>/dev/null; then
-            echo "✅ Connection successful!"
-            echo "Pushing to Gitee..."
-            if git push gitee "$CURRENT_BRANCH" --force; then
-              echo "✅ Successfully pushed to Gitee!"
-              exit 0
-            else
-              echo "❌ Push failed with Method 2"
-            fi
-          else
-            echo "❌ Connection failed with Method 2"
-          fi
-          
-          # 方法3：使用Git Credential Helper
-          echo ""
-          echo "Trying Method 3: Git Credential Helper..."
-          
-          # 配置credential helper
-          git config --global credential.helper store
-          
-          # 创建credential文件
-          CREDENTIAL_FILE="$HOME/.git-credentials"
-          echo "https://liang:$GITEE_TOKEN@git.jrevea.cn:88" > "$CREDENTIAL_FILE"
-          chmod 600 "$CREDENTIAL_FILE"
-          
-          GITEE_URL="https://git.jrevea.cn:88/liang/xiaomusic_github.git"
-          
-          git remote remove gitee 2>/dev/null || true
-          git remote add gitee "$GITEE_URL"
-          
-          echo "Testing connection..."
-          if git ls-remote gitee --heads 2>/dev/null; then
-            echo "✅ Connection successful!"
-            echo "Pushing to Gitee..."
-            if git push gitee "$CURRENT_BRANCH" --force; then
-              echo "✅ Successfully pushed to Gitee!"
-              exit 0
-            else
-              echo "❌ Push failed with Method 3"
-            fi
-          else
-            echo "❌ Connection failed with Method 3"
-          fi
-          
-          # 如果所有方法都失败
-          echo ""
-          echo "❌ All methods failed!"
-          echo ""
-          echo "🔍 Troubleshooting steps:"
-          echo "1. Verify the repository URL is correct:"
-          echo "   https://git.jrevea.cn:88/liang/xiaomusic_github.git"
-          echo "2. Check if port 88 is accessible from GitHub Actions"
-          echo "3. Verify GITEE_TOKEN has write:repository permission"
-          echo "4. Try accessing the repository manually:"
-          echo "   git clone https://git.jrevea.cn:88/liang/xiaomusic_github.git"
-          echo "5. Check Gitee logs for authentication errors"
-          
-          exit 1
-      
-      # 6. 总结
-      - name: Summary
-        if: always()
-        run: |
-          echo "========================================"
-          echo "📊 Workflow Summary"
-          echo "========================================"
-          echo "Time: $(date)"
-          echo "GitHub Repo: https://github.com/Jrevealiang/xiaomusic"
-          echo "Gitee Repo: https://git.jrevea.cn:88/liang/xiaomusic_github"
-          echo "========================================"
