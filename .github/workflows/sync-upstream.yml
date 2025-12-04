@@ -1,4 +1,4 @@
-name: Sync to Gitee via SSH on Port 88
+name: Sync to Gitee via HTTPS Port 88
 
 on:
   schedule:
@@ -15,10 +15,47 @@ jobs:
         with:
           fetch-depth: 0
       
-      - name: Configure Git
+      - name: Configure Git for Port 88
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 禁用SSL验证（针对自签名证书）
+          git config http.sslVerify "false"
+          
+          # 增加缓冲区大小
+          git config http.postBuffer 524288000
+          
+          echo "Git configuration:"
+          git config --list | grep -E "http|ssl|user"
+      
+      - name: Network Test for Port 88
+        run: |
+          echo "=== Testing Port 88 Connectivity ==="
+          
+          echo "1. Testing DNS resolution..."
+          nslookup git.jrevea.cn || dig git.jrevea.cn +short || echo "DNS test"
+          
+          echo ""
+          echo "2. Testing port 88 connectivity..."
+          timeout 10 nc -zv git.jrevea.cn 88 2>&1 || {
+            echo "❌ Port 88 is not accessible"
+            echo "This may be blocked by GitHub Actions network"
+          }
+          
+          echo ""
+          echo "3. Testing HTTPS on port 88..."
+          timeout 15 curl -k -v -I "https://git.jrevea.cn:88/" 2>&1 | grep -E "(Connected|HTTP|SSL)" || {
+            echo "❌ HTTPS on port 88 failed"
+            echo "Possible issues:"
+            echo "- Firewall blocking port 88"
+            echo "- SSL certificate issues"
+            echo "- Network restrictions"
+          }
+          
+          echo ""
+          echo "4. GitHub Actions IP address:"
+          curl -s ifconfig.me || curl -s ipinfo.io/ip || echo "Unknown"
       
       - name: Sync from upstream
         run: |
@@ -26,7 +63,7 @@ jobs:
           git fetch upstream
           git checkout main 2>/dev/null || git checkout master
           CURRENT_BRANCH=$(git branch --show-current)
-          git merge upstream/$CURRENT_BRANCH --no-edit --strategy-option theirs || echo "Merge completed"
+          git merge upstream/$CURRENT_BRANCH --no-edit --strategy-option theirs || echo "Merge note"
       
       - name: Push to GitHub
         run: |
@@ -35,55 +72,92 @@ jobs:
             git push origin $CURRENT_BRANCH
           fi
       
-      - name: Setup SSH for Gitee Port 88
+      - name: Push to Gitee with Advanced HTTPS
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
-          echo "=== Setting up SSH for Gitee (Port 88) ==="
+          echo "=== Pushing to Gitee via HTTPS Port 88 ==="
           
-          if [ -z "$SSH_PRIVATE_KEY" ]; then
-            echo "❌ SSH_PRIVATE_KEY is not set"
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "❌ GITEE_TOKEN is not set"
+            echo "Please add GITEE_TOKEN to GitHub Secrets"
             exit 1
           fi
           
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          
-          # SSH over port 88 (如果Gitee支持SSH on port 88)
-          cat > ~/.ssh/config << EOF
-          Host git.jrevea.cn
-            HostName git.jrevea.cn
-            Port 88
-            User git
-            IdentityFile ~/.ssh/id_rsa
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-          EOF
-          
-          chmod 600 ~/.ssh/config
-          
-          echo "Testing SSH connection on port 88..."
-          ssh -T git@git.jrevea.cn 2>&1 | head -5 || echo "SSH test attempted"
-      
-      - name: Push to Gitee via SSH Port 88
-        run: |
-          echo "=== Pushing to Gitee via SSH (Port 88) ==="
-          
           CURRENT_BRANCH=$(git branch --show-current)
+          echo "Branch: $CURRENT_BRANCH"
           
-          # 尝试SSH over port 88
-          GITEE_SSH_URL="ssh://git@git.jrevea.cn:88/liang/xiaomusic_github.git"
+          # 方法1: 标准HTTPS
+          echo ""
+          echo "🔧 Method 1: Standard HTTPS"
+          GITEE_URL="https://liang:$GITEE_TOKEN@git.jrevea.cn:88/liang/xiaomusic_github.git"
           
-          git remote remove gitee-ssh 2>/dev/null || true
-          git remote add gitee-ssh "$GITEE_SSH_URL"
+          git remote remove gitee 2>/dev/null || true
+          git remote add gitee "$GITEE_URL"
           
           echo "Testing connection..."
-          if timeout 30 git ls-remote gitee-ssh 2>&1; then
-            echo "✅ SSH connection successful on port 88!"
-            git push gitee-ssh "$CURRENT_BRANCH" --force && echo "✅ Push successful!"
-          else
-            echo "❌ SSH on port 88 failed, trying HTTPS..."
+          if timeout 30 git ls-remote gitee 2>&1; then
+            echo "✅ Connection successful!"
+            echo "Pushing changes..."
+            git push gitee "$CURRENT_BRANCH" --force && {
+              echo "✅ Successfully pushed to Gitee!"
+              exit 0
+            }
           fi
+          
+          # 方法2: 使用环境变量
+          echo ""
+          echo "🔧 Method 2: Using environment variables"
+          export GIT_ASKPASS=/tmp/git-askpass.sh
+          
+          cat > /tmp/git-askpass.sh << 'EOF'
+          #!/bin/bash
+          echo "$GITEE_TOKEN"
+          EOF
+          chmod +x /tmp/git-askpass.sh
+          
+          git remote remove gitee2 2>/dev/null || true
+          git remote add gitee2 "https://git.jrevea.cn:88/liang/xiaomusic_github.git"
+          
+          echo "Testing with GIT_ASKPASS..."
+          GIT_TERMINAL_PROMPT=0 timeout 30 git ls-remote gitee2 2>&1 && {
+            echo "✅ Connection successful!"
+            git push gitee2 "$CURRENT_BRANCH" --force && {
+              echo "✅ Successfully pushed to Gitee!"
+              exit 0
+            }
+          }
+          
+          # 方法3: 使用credential helper
+          echo ""
+          echo "🔧 Method 3: Using credential helper"
+          git config credential.helper 'store --file .git-credentials'
+          echo "https://liang:$GITEE_TOKEN@git.jrevea.cn:88" > .git-credentials
+          
+          git remote remove gitee3 2>/dev/null || true
+          git remote add gitee3 "https://git.jrevea.cn:88/liang/xiaomusic_github.git"
+          
+          echo "Testing with credential helper..."
+          timeout 30 git ls-remote gitee3 2>&1 && {
+            echo "✅ Connection successful!"
+            git push gitee3 "$CURRENT_BRANCH" --force && {
+              echo "✅ Successfully pushed to Gitee!"
+              exit 0
+            }
+          }
+          
+          echo ""
+          echo "❌ All HTTPS methods failed"
+          echo ""
+          echo "🔍 Diagnostic Information:"
+          echo "Repository URL: https://git.jrevea.cn:88/liang/xiaomusic_github.git"
+          echo "Port: 88"
+          echo "Protocol: HTTPS"
+          echo ""
+          echo "💡 Possible Solutions:"
+          echo "1. Check if port 88 is open to GitHub IP ranges"
+          echo "2. Add GitHub Actions IP to Gitee firewall whitelist"
+          echo "3. Configure Gitee to use standard ports (443 for HTTPS, 22 for SSH)"
+          echo "4. Use a proxy server"
+          
+          exit 1
