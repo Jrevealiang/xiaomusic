@@ -20,6 +20,6 @@ jobs:
       - name: Mirror
         uses: actions-hub/mirror-action@v1.0.0
         with:
-          target-url: https://github.com/Jrevealiang/xiaomusic.git  # 替换为你的 Fork 地址
+          target-url: https://github.com/hanxi/xiaomusic.git  # 替换为你的 Fork 地址
           target-branch: main
           
