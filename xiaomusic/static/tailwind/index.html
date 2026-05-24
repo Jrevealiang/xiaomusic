@@ -146,7 +146,7 @@
                             <li v-for="playlist in customPlaylists" :key="playlist.name">
                                 <a class="flex justify-between" :class="{ active: curSelectPlaylist === playlist.name }"
                                     @click="selectPlaylist(playlist.name)">
-                                    <span class="truncate flex-1">{{ playlist.name }}</span>
+                                    <span class="truncate flex-1" style="white-space:unset;">{{ playlist.name }}</span>
                                     <div class="badge badge-sm">{{ playlist.count }}</div>
                                 </a>
                             </li>
@@ -255,7 +255,7 @@
                             <!-- <a href="./now_playing.html" target="_blank"> -->
                                 <div class="w-12 rounded-lg">
 <!--                                    <img :src="currentSong?.cover" :alt="currentSong?.title" />-->
-                                    <img :src="currentSong?.cover || '/static/xiaoai.png'" :alt="currentSong?.title" />
+                                    <img :src="currentSong?.cover || '/static/changpian.png'" :alt="currentSong?.title" />
                                 </div>
                             <!-- </a> -->
                         </div>
@@ -503,7 +503,7 @@
                                             title: tags.title || data.cur_music,
                                             artist: tags.artist || '未知歌手',
                                             album: tags.album || '未知专辑',
-                                            cover: tags.picture || "/static/xiaoai.png",
+                                            cover: tags.picture || "/static/changpian.png",
                                             url: musicInfo.url,
                                             isPlaying: data.is_playing
                                         };
@@ -515,7 +515,7 @@
                                         title: data.cur_music,
                                         artist: '未知歌手',
                                         album: '未知专辑',
-                                        cover: "/static/xiaoai.png",
+                                        cover: "/static/changpian.png",
                                         isPlaying: data.is_playing
                                     };
                                 }
@@ -669,11 +669,25 @@
 
                 const loadSongs = async (songNames) => {
                     try {
+                        const normalizeSongItem = (song) => {
+                            if (typeof song === 'string') {
+                                return { raw: song, name: song };
+                            }
+                            if (song && typeof song === 'object') {
+                                const name = song.name || song.title || song.id || JSON.stringify(song);
+                                return { raw: song, name };
+                            }
+                            return { raw: song, name: String(song) };
+                        };
+
+                        const normalizedSongs = songNames.map(normalizeSongItem);
+
                         // 使用 getMusicInfos 批量获取歌曲信息
-                        const songsInfo = await API.getMusicInfos(songNames);
+                        const songsInfo = await API.getMusicInfos(normalizedSongs.map(song => song.name));
 
                         // 更新歌曲信息
-                        songs.value = songNames.map(songName => {
+                        songs.value = normalizedSongs.map(song => {
+                            const songName = song.name;
                             const info = songsInfo.find(s => s.name === songName);
                             if (!info) {
                                 console.error(`No info found for song ${songName}`);
@@ -683,7 +697,7 @@
                                     artist: '未知歌手',
                                     album: '未知专辑',
                                     duration: '0:00',
-                                    cover: '/static/xiaoai.png',
+                                    cover: '/static/changpian.png',
                                     url: '',
                                     isLoading: false
                                 };
@@ -697,7 +711,7 @@
                                 year: info.tags?.year || '',
                                 genre: info.tags?.genre || '',
                                 duration: info.duration ? formatTime(info.duration) : '0:00',
-                                cover: info.tags?.picture || '/static/xiaoai.png',
+                                cover: info.tags?.picture || '/static/changpian.png',
                                 url: info.url,
                                 lyrics: info.tags?.lyrics || '',
                                 isLoading: false
@@ -913,7 +927,8 @@
 
                                 // 验证URL是否有效
                                 const validUrl = new URL(musicInfo.url);
-                                if (!validUrl.pathname.endsWith('.mp3')) {
+                                const audioExts = ['.mp3', '.flac', '.wav', '.ogg', '.aac', '.m4a', '.wma', '.ape'];
+                                if (!audioExts.some(ext => validUrl.pathname.endsWith(ext))) {
                                     console.error('Invalid music URL format:', validUrl);
                                     showMessage('音乐文件格式不支持', 'alert-error');
                                     return;
@@ -1200,7 +1215,7 @@
                             artist: '未知歌手',
                             album: '未知专辑',
                             duration: '0:00',
-                            cover: '/static/xiaoai.png',
+                            cover: '/static/changpian.png',
                             url: '',
                             isLoading: false
                         }));
